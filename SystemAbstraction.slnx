@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="SystemAbstraction.vcxproj" Id="a8cddc94-2696-4c6d-ba25-336958d5d1fd" />
+</Solution>
