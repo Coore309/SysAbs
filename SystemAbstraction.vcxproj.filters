@@ -19,13 +19,16 @@
     <Filter Include="源文件\Windows">
       <UniqueIdentifier>{8c20093c-55a8-4542-ad02-fd28c1a0226a}</UniqueIdentifier>
     </Filter>
+    <Filter Include="头文件\Windows">
+      <UniqueIdentifier>{7916de0a-c98a-4adb-a867-389b19ee42e4}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\sysabs\ifilesystem.h">
       <Filter>头文件</Filter>
     </ClInclude>
-    <ClInclude Include="include\sysabs\windows_filesystem.h">
-      <Filter>头文件</Filter>
+    <ClInclude Include="include\sysabs\platform\windows_filesystem.h">
+      <Filter>头文件\Windows</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -33,6 +36,12 @@
       <Filter>源文件\Windows</Filter>
     </ClCompile>
     <ClCompile Include="test\ifilesystem\test01_file_attributes.cpp">
+      <Filter>源文件\测试代码</Filter>
+    </ClCompile>
+    <ClCompile Include="src\factory.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="test02_file_bytes_oi.cpp">
       <Filter>源文件\测试代码</Filter>
     </ClCompile>
   </ItemGroup>
