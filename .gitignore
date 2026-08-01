@@ -429,4 +429,4 @@ FodyWeavers.xsd
 *.msp
 
 # Special Dir
-test/testzone/
+test/

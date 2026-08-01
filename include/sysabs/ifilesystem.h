@@ -302,14 +302,14 @@ namespace sysabs {
 		virtual FileSystemError moveDirectory(const std::string& src, const std::string& dst, bool overwrite = false) = 0;
 
 		/**
-		 * \brief 删除目录
+		 * \brief 删除空目录
 		 * 
 		 * \param path 要删除的目录路径
 		 * \return FileSystemError::Success 删除成功
 		 *         FileSystemError::NotFound 目录不存在
 		 *         FileSystemError::InvalidPath 无效路径
 		 *         FileSystemError::AccessDenied 程序权限不足
-		 *         FileSystemError::DirectoryNotEmpty 目录非空且本次操作为不递归删除
+		 *         FileSystemError::DirectoryNotEmpty 目录非空
 		 *         FileSystemError::IsFile 路径为文件，若需要删除文件，请调用 deleteFile 函数
 		 *         FileSystemError::Unknown 未知错误
 		 */
