@@ -1,421 +1,393 @@
 #if 0
-
+// ============================================================================
 // test01_file_attributes.cpp
-// 全量测试 IFileSystem 接口的“文件存在性及其元数据查询”模块
-// 测试目标：IFileSystem 第一模块（文件存在性及其元数据查询）接口（通过工厂创建平台实现）
-// 测试目录：test\testzone
+// SysAbs 第一模块全量测试 - 文件存在性及其元数据查询
+// 编译输出目录: $(ProjectDir)test
+// 工作目录: $(ProjectDir)test\testzone
+// 路径基准: 程序所在目录（exe位置）
+// 操作走接口，验证走底层 WinAPI（独立检验结果正确性）
+// ============================================================================
 
 /*
-该文件（test01_file_attributes.cpp）的所有代码均由 AI 生成。
-只是我懒得写那么多而已，写库就已经够我掉几十根头发了。
+该文件的所有代码均由 AI 生成。
 */
 
-#define _CRT_SECURE_NO_WARNINGS
-#include <windows.h>
 #include <iostream>
-#include <fstream>
 #include <string>
-#include <cstdlib>
-#include <direct.h>   // _mkdir
-#include <memory>     // for std::unique_ptr
+#include <vector>
+#include <cstring>
 
-// 设置控制台编码为 UTF-8
-void SetConsoleUTF8() {
-    SetConsoleOutputCP(CP_UTF8);
-    SetConsoleCP(CP_UTF8);
+#include <sysabs/ifilesystem.h>
+#include <Windows.h>
+
+using namespace sysabs;
+
+// ---------------------------------------------------------------------------
+// 辅助工具（WinAPI，用于测试环境准备、验证、清理）
+// ---------------------------------------------------------------------------
+
+static std::wstring testChartoWide(const std::string& utf8) {
+    if (utf8.empty()) return {};
+    int len = MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, nullptr, 0);
+    if (len <= 0) return {};
+    std::wstring wstr(len, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, &wstr[0], len);
+    wstr.pop_back();
+    return wstr;
 }
 
-#include <sysabs/ifilesystem.h>   // 公开接口（含工厂函数声明）
-
-// ========== 辅助函数 ==========
-bool create_test_file(const std::string& path, const std::string& content = "Hello") {
-    std::ofstream file(path);
-    if (file.is_open()) {
-        file << content;
-        file.close();
-        return true;
-    }
-    return false;
+static std::string getExeDirectory() {
+    wchar_t exePath[MAX_PATH];
+    GetModuleFileNameW(NULL, exePath, MAX_PATH);
+    std::wstring wpath(exePath);
+    size_t pos = wpath.find_last_of(L"\\");
+    if (pos != std::wstring::npos) wpath = wpath.substr(0, pos + 1);
+    int len = WideCharToMultiByte(CP_UTF8, 0, wpath.c_str(), -1, nullptr, 0, nullptr, nullptr);
+    std::string result(len, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, wpath.c_str(), -1, &result[0], len, nullptr, nullptr);
+    result.pop_back();
+    return result;
 }
 
-bool create_test_dir(const std::string& path) {
-    return CreateDirectoryA(path.c_str(), nullptr) != 0;
+static bool createDirWin(const std::wstring& wpath) {
+    return CreateDirectoryW(wpath.c_str(), NULL) || GetLastError() == ERROR_ALREADY_EXISTS;
 }
 
-bool delete_test_file(const std::string& path) {
-    return DeleteFileA(path.c_str()) != 0;
+static bool createFileWin(const std::wstring& wpath, const char* content) {
+    HANDLE h = CreateFileW(wpath.c_str(), GENERIC_WRITE, 0, NULL,
+        CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    DWORD written = 0;
+    bool ok = WriteFile(h, content, static_cast<DWORD>(strlen(content)), &written, NULL);
+    CloseHandle(h);
+    return ok;
 }
 
-bool delete_test_dir(const std::string& path) {
-    return RemoveDirectoryA(path.c_str()) != 0;
+// 用 WinAPI 获取路径属性数据（用于验证）
+static bool winGetAttrData(const std::wstring& wpath, _WIN32_FILE_ATTRIBUTE_DATA& out) {
+    return GetFileAttributesExW(wpath.c_str(), GetFileExInfoStandard, &out) != 0;
 }
 
-bool file_exists(const std::string& path) {
-    DWORD attr = GetFileAttributesA(path.c_str());
-    return attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY);
+// FILETIME → 毫秒时间戳（与接口 getLastModifiedTime 的换算一致）
+static int64_t filetimeToMillis(FILETIME ft) {
+    ULARGE_INTEGER u;
+    u.LowPart = ft.dwLowDateTime;
+    u.HighPart = ft.dwHighDateTime;
+    return static_cast<int64_t>((u.QuadPart - 116444736000000000ULL) / 10000);
 }
 
-bool dir_exists(const std::string& path) {
-    DWORD attr = GetFileAttributesA(path.c_str());
-    return attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY);
-}
-
-void ensure_test_dir() {
-    if (!dir_exists("test")) {
-        _mkdir("test");
-    }
-    if (!dir_exists("test\\testzone")) {
-        _mkdir("test\\testzone");
-    }
-}
-
-// ========== 测试函数（使用 sysabs:: 前缀） ==========
-
-bool test_exists(sysabs::IFileSystem* fs) {
-    std::cout << "\n--- test_exists ---" << std::endl;
-    bool all_ok = true;
-
-    // 1. 正常文件存在
-    {
-        std::string path = "test\\testzone\\normal_file.txt";
-        create_test_file(path);
-        auto err = fs->exists(path);
-        bool ok = (err == sysabs::FileSystemError::Success);
-        std::cout << "  正常文件存在: " << (ok ? "✅ PASS" : "❌ FAIL") << std::endl;
-        if (!ok) all_ok = false;
-        delete_test_file(path);
-    }
-
-    // 2. 目录存在
-    {
-        std::string path = "test\\testzone\\empty_dir";
-        create_test_dir(path);
-        auto err = fs->exists(path);
-        bool ok = (err == sysabs::FileSystemError::Success);
-        std::cout << "  目录存在: " << (ok ? "✅ PASS" : "❌ FAIL") << std::endl;
-        if (!ok) all_ok = false;
-        delete_test_dir(path);
-    }
-
-    // 3. 路径不存在
-    {
-        std::string path = "test\\testzone\\not_exist.txt";
-        auto err = fs->exists(path);
-        bool ok = (err == sysabs::FileSystemError::NotFound);
-        std::cout << "  路径不存在: " << (ok ? "✅ PASS" : "❌ FAIL") << std::endl;
-        if (!ok) all_ok = false;
-    }
-
-    // 4. 无效路径（含非法字符）
-    {
-        std::string path = "test\\testzone\\:invalid";
-        auto err = fs->exists(path);
-        bool ok = (err == sysabs::FileSystemError::InvalidPath);
-        std::cout << "  无效路径（非法字符）: " << (ok ? "✅ PASS" : "❌ FAIL") << std::endl;
-        if (!ok) all_ok = false;
-    }
-
-    // 5. 空路径
-    {
-        std::string path = "";
-        auto err = fs->exists(path);
-        bool ok = (err == sysabs::FileSystemError::InvalidPath);
-        std::cout << "  空路径: " << (ok ? "✅ PASS" : "❌ FAIL") << std::endl;
-        if (!ok) all_ok = false;
-    }
-
-    // 6. 权限受限的文件（需要手动准备）
-    {
-        const std::string path = "test\\testzone\\restricted_file.txt";
-        if (!file_exists(path)) {
-            std::cout << "  ⚠️ 受限文件不存在，请手动创建后按任意键继续..." << std::endl;
-            system("pause");
-        }
-        if (file_exists(path)) {
-            auto err = fs->exists(path);
-            std::cout << "  err value: " << static_cast<int>(err) << std::endl;
-            std::cout << "  错误信息: " << fs->getLastErrorMessage() << std::endl;
-            bool ok = (err == sysabs::FileSystemError::AccessDenied);
-            std::cout << "  权限受限的文件: " << (ok ? "✅ PASS" : "❌ FAIL") << std::endl;
-            if (!ok) all_ok = false;
+static void deleteDirRecursive(const std::wstring& wdir) {
+    std::wstring search = wdir + L"\\*";
+    WIN32_FIND_DATAW ffd;
+    HANDLE hFind = FindFirstFileW(search.c_str(), &ffd);
+    if (hFind == INVALID_HANDLE_VALUE) return;
+    do {
+        if (wcscmp(ffd.cFileName, L".") == 0 || wcscmp(ffd.cFileName, L"..") == 0) continue;
+        std::wstring fullPath = wdir + L"\\" + ffd.cFileName;
+        if (ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            deleteDirRecursive(fullPath);
         }
         else {
-            std::cout << "  权限受限的文件: ⚠️ SKIP (文件不存在)" << std::endl;
+            SetFileAttributesW(fullPath.c_str(), FILE_ATTRIBUTE_NORMAL);
+            DeleteFileW(fullPath.c_str());
         }
-    }
-
-    return all_ok;
+    } while (FindNextFileW(hFind, &ffd) != 0);
+    FindClose(hFind);
+    RemoveDirectoryW(wdir.c_str());
 }
 
-bool test_getFileType(sysabs::IFileSystem* fs) {
-    std::cout << "\n--- test_getFileType ---" << std::endl;
-    bool all_ok = true;
+static void testPass(const char* name) { std::cout << "[PASS] " << name << std::endl; }
+static void testFail(const char* name, const char* detail) { std::cout << "[FAIL] " << name << " : " << detail << std::endl; }
 
-    // 1. 正常文件
-    {
-        std::string path = "test\\testzone\\normal_file.txt";
-        create_test_file(path);
-        sysabs::FileType type;
-        auto err = fs->getFileType(path, type);
-        bool ok = (err == sysabs::FileSystemError::Success && type == sysabs::FileType::File);
-        std::cout << "  正常文件: " << (ok ? "✅ PASS" : "❌ FAIL") << std::endl;
-        if (!ok) all_ok = false;
-        delete_test_file(path);
-    }
+// ---------------------------------------------------------------------------
+// 测试主逻辑
+// ---------------------------------------------------------------------------
 
-    // 2. 目录
-    {
-        std::string path = "test\\testzone\\empty_dir";
-        create_test_dir(path);
-        sysabs::FileType type;
-        auto err = fs->getFileType(path, type);
-        bool ok = (err == sysabs::FileSystemError::Success && type == sysabs::FileType::Directory);
-        std::cout << "  目录: " << (ok ? "✅ PASS" : "❌ FAIL") << std::endl;
-        if (!ok) all_ok = false;
-        delete_test_dir(path);
-    }
-
-    // 3. 路径不存在
-    {
-        std::string path = "test\\testzone\\not_exist.txt";
-        sysabs::FileType type;
-        auto err = fs->getFileType(path, type);
-        bool ok = (err == sysabs::FileSystemError::NotFound && type == sysabs::FileType::NotFound);
-        std::cout << "  路径不存在: " << (ok ? "✅ PASS" : "❌ FAIL") << std::endl;
-        if (!ok) all_ok = false;
-    }
-
-    // 4. 无效路径
-    {
-        std::string path = "test\\testzone\\:invalid";
-        sysabs::FileType type;
-        auto err = fs->getFileType(path, type);
-        bool ok = (err == sysabs::FileSystemError::InvalidPath);
-        std::cout << "  无效路径: " << (ok ? "✅ PASS" : "❌ FAIL") << std::endl;
-        if (!ok) all_ok = false;
-    }
-
-    // 5. 空路径
-    {
-        std::string path = "";
-        sysabs::FileType type;
-        auto err = fs->getFileType(path, type);
-        bool ok = (err == sysabs::FileSystemError::InvalidPath);
-        std::cout << "  空路径: " << (ok ? "✅ PASS" : "❌ FAIL") << std::endl;
-        if (!ok) all_ok = false;
-    }
-
-    // 6. 权限受限的文件
-    {
-        const std::string path = "test\\testzone\\restricted_file.txt";
-        if (!file_exists(path)) {
-            std::cout << "  ⚠️ 受限文件不存在，请手动创建后按任意键继续..." << std::endl;
-            system("pause");
-        }
-        if (file_exists(path)) {
-            sysabs::FileType type;
-            auto err = fs->getFileType(path, type);
-            bool ok = (err == sysabs::FileSystemError::AccessDenied);
-            std::cout << "  权限受限的文件: " << (ok ? "✅ PASS" : "❌ FAIL") << std::endl;
-            if (!ok) all_ok = false;
-        }
-        else {
-            std::cout << "  权限受限的文件: ⚠️ SKIP" << std::endl;
-        }
-    }
-
-    return all_ok;
-}
-
-bool test_getFileSize(sysabs::IFileSystem* fs) {
-    std::cout << "\n--- test_getFileSize ---" << std::endl;
-    bool all_ok = true;
-
-    // 1. 正常文件
-    {
-        std::string path = "test\\testzone\\normal_file.txt";
-        const char* content = "Hello";
-        create_test_file(path, content);
-        uint64_t size;
-        auto err = fs->getFileSize(path, size);
-        bool ok = (err == sysabs::FileSystemError::Success && size == strlen(content));
-        std::cout << "  正常文件: " << (ok ? "✅ PASS" : "❌ FAIL") << std::endl;
-        if (!ok) all_ok = false;
-        delete_test_file(path);
-    }
-
-    // 2. 目录（应返回 IsDirectory）
-    {
-        std::string path = "test\\testzone\\empty_dir";
-        create_test_dir(path);
-        uint64_t size;
-        auto err = fs->getFileSize(path, size);
-        bool ok = (err == sysabs::FileSystemError::IsDirectory);
-        std::cout << "  目录（应返回 IsDirectory）: " << (ok ? "✅ PASS" : "❌ FAIL") << std::endl;
-        if (!ok) all_ok = false;
-        delete_test_dir(path);
-    }
-
-    // 3. 路径不存在
-    {
-        std::string path = "test\\testzone\\not_exist.txt";
-        uint64_t size;
-        auto err = fs->getFileSize(path, size);
-        bool ok = (err == sysabs::FileSystemError::NotFound);
-        std::cout << "  路径不存在: " << (ok ? "✅ PASS" : "❌ FAIL") << std::endl;
-        if (!ok) all_ok = false;
-    }
-
-    // 4. 无效路径
-    {
-        std::string path = "test\\testzone\\:invalid";
-        uint64_t size;
-        auto err = fs->getFileSize(path, size);
-        bool ok = (err == sysabs::FileSystemError::InvalidPath);
-        std::cout << "  无效路径: " << (ok ? "✅ PASS" : "❌ FAIL") << std::endl;
-        if (!ok) all_ok = false;
-    }
-
-    // 5. 空路径
-    {
-        std::string path = "";
-        uint64_t size;
-        auto err = fs->getFileSize(path, size);
-        bool ok = (err == sysabs::FileSystemError::InvalidPath);
-        std::cout << "  空路径: " << (ok ? "✅ PASS" : "❌ FAIL") << std::endl;
-        if (!ok) all_ok = false;
-    }
-
-    // 6. 权限受限的文件
-    {
-        const std::string path = "test\\testzone\\restricted_file.txt";
-        if (!file_exists(path)) {
-            std::cout << "  ⚠️ 受限文件不存在，请手动创建后按任意键继续..." << std::endl;
-            system("pause");
-        }
-        if (file_exists(path)) {
-            uint64_t size;
-            auto err = fs->getFileSize(path, size);
-            bool ok = (err == sysabs::FileSystemError::AccessDenied);
-            std::cout << "  权限受限的文件: " << (ok ? "✅ PASS" : "❌ FAIL") << std::endl;
-            if (!ok) all_ok = false;
-        }
-        else {
-            std::cout << "  权限受限的文件: ⚠️ SKIP" << std::endl;
-        }
-    }
-
-    return all_ok;
-}
-
-bool test_getLastModifiedTime(sysabs::IFileSystem* fs) {
-    std::cout << "\n--- test_getLastModifiedTime ---" << std::endl;
-    bool all_ok = true;
-
-    // 1. 正常文件
-    {
-        std::string path = "test\\testzone\\normal_file.txt";
-        create_test_file(path, "Test");
-        int64_t time;
-        auto err = fs->getLastModifiedTime(path, time);
-        bool ok = (err == sysabs::FileSystemError::Success && time > 0);
-        std::cout << "  正常文件: " << (ok ? "✅ PASS" : "❌ FAIL") << std::endl;
-        if (!ok) all_ok = false;
-        delete_test_file(path);
-    }
-
-    // 2. 目录（应返回 IsDirectory）
-    {
-        std::string path = "test\\testzone\\empty_dir";
-        create_test_dir(path);
-        int64_t time;
-        auto err = fs->getLastModifiedTime(path, time);
-        bool ok = (err == sysabs::FileSystemError::IsDirectory);
-        std::cout << "  目录（应返回 IsDirectory）: " << (ok ? "✅ PASS" : "❌ FAIL") << std::endl;
-        if (!ok) all_ok = false;
-        delete_test_dir(path);
-    }
-
-    // 3. 路径不存在
-    {
-        std::string path = "test\\testzone\\not_exist.txt";
-        int64_t time;
-        auto err = fs->getLastModifiedTime(path, time);
-        bool ok = (err == sysabs::FileSystemError::NotFound);
-        std::cout << "  路径不存在: " << (ok ? "✅ PASS" : "❌ FAIL") << std::endl;
-        if (!ok) all_ok = false;
-    }
-
-    // 4. 无效路径
-    {
-        std::string path = "test\\testzone\\:invalid";
-        int64_t time;
-        auto err = fs->getLastModifiedTime(path, time);
-        bool ok = (err == sysabs::FileSystemError::InvalidPath);
-        std::cout << "  无效路径: " << (ok ? "✅ PASS" : "❌ FAIL") << std::endl;
-        if (!ok) all_ok = false;
-    }
-
-    // 5. 空路径
-    {
-        std::string path = "";
-        int64_t time;
-        auto err = fs->getLastModifiedTime(path, time);
-        bool ok = (err == sysabs::FileSystemError::InvalidPath);
-        std::cout << "  空路径: " << (ok ? "✅ PASS" : "❌ FAIL") << std::endl;
-        if (!ok) all_ok = false;
-    }
-
-    // 6. 权限受限的文件
-    {
-        const std::string path = "test\\testzone\\restricted_file.txt";
-        if (!file_exists(path)) {
-            std::cout << "  ⚠️ 受限文件不存在，请手动创建后按任意键继续..." << std::endl;
-            system("pause");
-        }
-        if (file_exists(path)) {
-            int64_t time;
-            auto err = fs->getLastModifiedTime(path, time);
-            bool ok = (err == sysabs::FileSystemError::AccessDenied);
-            std::cout << "  权限受限的文件: " << (ok ? "✅ PASS" : "❌ FAIL") << std::endl;
-            if (!ok) all_ok = false;
-        }
-        else {
-            std::cout << "  权限受限的文件: ⚠️ SKIP" << std::endl;
-        }
-    }
-
-    return all_ok;
-}
-
-// ========== 主函数 ==========
 int main() {
-    SetConsoleUTF8();
+    SetConsoleOutputCP(CP_UTF8);
 
-    std::cout << "=== IFileSystem 文件元数据查询全量测试 ===" << std::endl;
-    std::cout << "提示：测试前请确保 test\\testzone 目录存在" << std::endl;
-    std::cout << "如需测试 AccessDenied，请按提示创建受限文件" << std::endl;
+    std::cout << "========================================" << std::endl;
+    std::cout << " SysAbs 第一模块全量测试 - 元数据查询" << std::endl;
+    std::cout << "========================================" << std::endl;
 
-    ensure_test_dir();
+    std::string exeDir = getExeDirectory();
+    std::string zoneDir = exeDir + "testzone\\";
+    std::wstring wZoneDir = testChartoWide(zoneDir);
+    std::wstring wTestDir = wZoneDir + L"test_first_module";
 
-    // 通过工厂创建平台相关实例，返回 unique_ptr
-    auto fs = sysabs::createFileSystem();
-    if (!fs) {
-        std::cerr << "❌ 创建文件系统实例失败！" << std::endl;
+    if (!createDirWin(wTestDir)) {
+        std::cout << "[ERROR] 无法创建测试目录" << std::endl;
         return 1;
     }
+    std::cout << "[环境] 测试目录: " << zoneDir << "test_first_module" << std::endl;
 
-    bool all_passed = true;
-    all_passed &= test_exists(fs.get());
-    all_passed &= test_getFileType(fs.get());
-    all_passed &= test_getFileSize(fs.get());
-    all_passed &= test_getLastModifiedTime(fs.get());
+    auto fs = createFileSystem();
+    if (!fs) { std::cout << "[ERROR] createFileSystem() 返回 nullptr" << std::endl; return 1; }
+    std::cout << "[环境] IFileSystem 实例创建成功" << std::endl << std::endl;
 
-    std::cout << "\n=== 测试结果 ===" << std::endl;
-    std::cout << (all_passed ? "🎉 所有测试通过！" : "❌ 部分测试失败，请检查输出。") << std::endl;
+    int totalTests = 0, passedTests = 0, failedTests = 0;
+    auto report = [&](bool ok, const char* name, const char* detail = "") {
+        totalTests++;
+        if (ok) { passedTests++; testPass(name); }
+        else { failedTests++; testFail(name, detail); }
+        };
 
-    system("pause");
-    return all_passed ? 0 : 1;
+    auto wpath = [&](const char* rel) -> std::wstring { return wTestDir + L"\\" + testChartoWide(rel); };
+    auto spath = [&](const char* rel) -> std::string { return zoneDir + "test_first_module\\" + rel; };
+
+    std::string p1;
+    FileType outType;
+    uint64_t outSize = 0;
+    int64_t outTime = 0;
+
+    // =====================================================================
+    // 1. validatePath 测试
+    // =====================================================================
+    std::cout << "--- validatePath 测试 ---" << std::endl;
+
+    report(!fs->validatePath(""), "空路径 → false");
+    report(fs->validatePath("C:/fish/nemo.txt"), "合法路径 → true");
+    report(!fs->validatePath("D:/fish/na?me.txt"), "非法字符 ? → false");
+    report(!fs->validatePath("1:/fish"), "非法盘符 → false");
+    report(fs->validatePath("c:/fish"), "小写盘符 → true");
+
+    std::cout << std::endl;
+
+    // =====================================================================
+    // 2. exists 测试
+    // =====================================================================
+    std::cout << "--- exists 测试 ---" << std::endl;
+
+    // 2.1 文件存在
+    {
+        p1 = spath("exists_file.txt");
+        createFileWin(wpath("exists_file.txt"), "data");
+        auto err = fs->exists(p1);
+        report(err == FileSystemError::Success, "文件存在 → Success",
+            err == FileSystemError::Success ? "" : ("实际: " + std::to_string(static_cast<int>(err))).c_str());
+        DeleteFileW(wpath("exists_file.txt").c_str());
+    }
+
+    // 2.2 目录存在
+    {
+        p1 = spath("exists_dir");
+        createDirWin(wpath("exists_dir"));
+        auto err = fs->exists(p1);
+        report(err == FileSystemError::Success, "目录存在 → Success",
+            err == FileSystemError::Success ? "" : ("实际: " + std::to_string(static_cast<int>(err))).c_str());
+        deleteDirRecursive(wpath("exists_dir"));
+    }
+
+    // 2.3 不存在
+    {
+        p1 = spath("exists_nonexistent");
+        auto err = fs->exists(p1);
+        report(err == FileSystemError::NotFound, "路径不存在 → NotFound",
+            err == FileSystemError::NotFound ? "" : ("实际: " + std::to_string(static_cast<int>(err))).c_str());
+    }
+
+    // 2.4 空路径
+    {
+        auto err = fs->exists("");
+        report(err == FileSystemError::InvalidPath, "空路径 → InvalidPath",
+            err == FileSystemError::InvalidPath ? "" : ("实际: " + std::to_string(static_cast<int>(err))).c_str());
+    }
+
+    // 2.5 非法字符路径
+    {
+        p1 = spath("illegal?.txt");
+        auto err = fs->exists(p1);
+        report(err == FileSystemError::InvalidPath, "非法字符路径 → InvalidPath",
+            err == FileSystemError::InvalidPath ? "" : ("实际: " + std::to_string(static_cast<int>(err))).c_str());
+    }
+
+    std::cout << std::endl;
+
+    // =====================================================================
+    // 3. getFileType 测试
+    // =====================================================================
+    std::cout << "--- getFileType 测试 ---" << std::endl;
+
+    // 3.1 文件（WinAPI 验证确为文件）
+    {
+        p1 = spath("type_file.txt");
+        createFileWin(wpath("type_file.txt"), "data");
+        outType = FileType::Unknown;
+        auto err = fs->getFileType(p1, outType);
+        _WIN32_FILE_ATTRIBUTE_DATA attr;
+        bool winIsFile = winGetAttrData(wpath("type_file.txt"), attr)
+            && !(attr.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY);
+        bool ok = (err == FileSystemError::Success && outType == FileType::File && winIsFile);
+        report(ok, "文件 → Success + File", ok ? "" : ("err=" + std::to_string(static_cast<int>(err))).c_str());
+        DeleteFileW(wpath("type_file.txt").c_str());
+    }
+
+    // 3.2 目录（WinAPI 验证确为目录）
+    {
+        p1 = spath("type_dir");
+        createDirWin(wpath("type_dir"));
+        outType = FileType::Unknown;
+        auto err = fs->getFileType(p1, outType);
+        _WIN32_FILE_ATTRIBUTE_DATA attr;
+        bool winIsDir = winGetAttrData(wpath("type_dir"), attr)
+            && (attr.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY);
+        bool ok = (err == FileSystemError::Success && outType == FileType::Directory && winIsDir);
+        report(ok, "目录 → Success + Directory", ok ? "" : ("err=" + std::to_string(static_cast<int>(err))).c_str());
+        deleteDirRecursive(wpath("type_dir"));
+    }
+
+    // 3.3 不存在
+    {
+        p1 = spath("type_nonexistent");
+        outType = FileType::Unknown;
+        auto err = fs->getFileType(p1, outType);
+        report(err == FileSystemError::NotFound && outType == FileType::NotFound, "不存在 → NotFound + FileType::NotFound",
+            err == FileSystemError::NotFound ? (outType == FileType::NotFound ? "" : "outType 不为 NotFound") : ("实际: " + std::to_string(static_cast<int>(err))).c_str());
+    }
+
+    // 3.4 空路径
+    {
+        outType = FileType::Unknown;
+        auto err = fs->getFileType("", outType);
+        report(err == FileSystemError::InvalidPath, "空路径 → InvalidPath",
+            err == FileSystemError::InvalidPath ? "" : ("实际: " + std::to_string(static_cast<int>(err))).c_str());
+    }
+
+    // 3.5 非法字符路径
+    {
+        p1 = spath("illegal|.txt");
+        outType = FileType::Unknown;
+        auto err = fs->getFileType(p1, outType);
+        report(err == FileSystemError::InvalidPath, "非法字符路径 → InvalidPath",
+            err == FileSystemError::InvalidPath ? "" : ("实际: " + std::to_string(static_cast<int>(err))).c_str());
+    }
+
+    std::cout << std::endl;
+
+    // =====================================================================
+    // 4. getFileSize 测试
+    // =====================================================================
+    std::cout << "--- getFileSize 测试 ---" << std::endl;
+
+    // 4.1 正常文件（WinAPI 验证大小一致）
+    {
+        p1 = spath("size_file.bin");
+        const char* content = "1234567890";  // 10 字节
+        createFileWin(wpath("size_file.bin"), content);
+        outSize = 0;
+        auto err = fs->getFileSize(p1, outSize);
+        _WIN32_FILE_ATTRIBUTE_DATA attr;
+        winGetAttrData(wpath("size_file.bin"), attr);
+        uint64_t winSize = (static_cast<uint64_t>(attr.nFileSizeHigh) << 32) | attr.nFileSizeLow;
+        bool ok = (err == FileSystemError::Success && outSize == 10 && winSize == 10);
+        report(ok, "正常文件 → Success + 大小正确", ok ? "" : ("err=" + std::to_string(static_cast<int>(err)) + " size=" + std::to_string(outSize)).c_str());
+        DeleteFileW(wpath("size_file.bin").c_str());
+    }
+
+    // 4.2 空文件
+    {
+        p1 = spath("size_empty.txt");
+        createFileWin(wpath("size_empty.txt"), "");
+        outSize = 999;
+        auto err = fs->getFileSize(p1, outSize);
+        report(err == FileSystemError::Success && outSize == 0, "空文件 → Success + 0",
+            err == FileSystemError::Success ? (outSize == 0 ? "" : "大小不为0") : ("err=" + std::to_string(static_cast<int>(err))).c_str());
+        DeleteFileW(wpath("size_empty.txt").c_str());
+    }
+
+    // 4.3 目录
+    {
+        p1 = spath("size_dir");
+        createDirWin(wpath("size_dir"));
+        outSize = 0;
+        auto err = fs->getFileSize(p1, outSize);
+        report(err == FileSystemError::IsDirectory, "目录 → IsDirectory",
+            err == FileSystemError::IsDirectory ? "" : ("实际: " + std::to_string(static_cast<int>(err))).c_str());
+        deleteDirRecursive(wpath("size_dir"));
+    }
+
+    // 4.4 不存在
+    {
+        p1 = spath("size_nonexistent");
+        outSize = 0;
+        auto err = fs->getFileSize(p1, outSize);
+        report(err == FileSystemError::NotFound, "不存在 → NotFound",
+            err == FileSystemError::NotFound ? "" : ("实际: " + std::to_string(static_cast<int>(err))).c_str());
+    }
+
+    // 4.5 空路径
+    {
+        outSize = 0;
+        auto err = fs->getFileSize("", outSize);
+        report(err == FileSystemError::InvalidPath, "空路径 → InvalidPath",
+            err == FileSystemError::InvalidPath ? "" : ("实际: " + std::to_string(static_cast<int>(err))).c_str());
+    }
+
+    std::cout << std::endl;
+
+    // =====================================================================
+    // 5. getLastModifiedTime 测试
+    // =====================================================================
+    std::cout << "--- getLastModifiedTime 测试 ---" << std::endl;
+
+    // 5.1 正常文件（WinAPI 验证时间戳一致）
+    {
+        p1 = spath("time_file.txt");
+        createFileWin(wpath("time_file.txt"), "data");
+        outTime = 0;
+        auto err = fs->getLastModifiedTime(p1, outTime);
+        _WIN32_FILE_ATTRIBUTE_DATA attr;
+        winGetAttrData(wpath("time_file.txt"), attr);
+        int64_t winTime = filetimeToMillis(attr.ftLastWriteTime);
+        bool ok = (err == FileSystemError::Success && outTime == winTime && outTime > 0);
+        report(ok, "正常文件 → Success + 时间戳一致", ok ? "" : ("err=" + std::to_string(static_cast<int>(err)) + " time=" + std::to_string(outTime)).c_str());
+        DeleteFileW(wpath("time_file.txt").c_str());
+    }
+
+    // 5.2 目录
+    {
+        p1 = spath("time_dir");
+        createDirWin(wpath("time_dir"));
+        outTime = 0;
+        auto err = fs->getLastModifiedTime(p1, outTime);
+        report(err == FileSystemError::IsDirectory, "目录 → IsDirectory",
+            err == FileSystemError::IsDirectory ? "" : ("实际: " + std::to_string(static_cast<int>(err))).c_str());
+        deleteDirRecursive(wpath("time_dir"));
+    }
+
+    // 5.3 不存在
+    {
+        p1 = spath("time_nonexistent");
+        outTime = 0;
+        auto err = fs->getLastModifiedTime(p1, outTime);
+        report(err == FileSystemError::NotFound, "不存在 → NotFound",
+            err == FileSystemError::NotFound ? "" : ("实际: " + std::to_string(static_cast<int>(err))).c_str());
+    }
+
+    // 5.4 空路径
+    {
+        outTime = 0;
+        auto err = fs->getLastModifiedTime("", outTime);
+        report(err == FileSystemError::InvalidPath, "空路径 → InvalidPath",
+            err == FileSystemError::InvalidPath ? "" : ("实际: " + std::to_string(static_cast<int>(err))).c_str());
+    }
+
+    std::cout << std::endl;
+
+    // =====================================================================
+    // 清理
+    // =====================================================================
+    std::cout << "--- 清理 ---" << std::endl;
+    deleteDirRecursive(wTestDir);
+    std::cout << "[清理] 已删除: " << zoneDir << "test_first_module" << std::endl << std::endl;
+
+    std::cout << "========================================" << std::endl;
+    std::cout << " 测试结果汇总" << std::endl;
+    std::cout << " 总计: " << totalTests << std::endl;
+    std::cout << " 通过: " << passedTests << std::endl;
+    std::cout << " 失败: " << failedTests << std::endl;
+    std::cout << "========================================" << std::endl;
+
+    return failedTests > 0 ? 1 : 0;
 }
-
 #endif

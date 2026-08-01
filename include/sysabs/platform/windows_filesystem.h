@@ -12,6 +12,9 @@ public:
 		return error_message_;
 	}
 
+	// 检查路径是否有效，能在当前系统被解析
+	bool validatePath(const std::string& path) override;
+
 	/*--------------------------------------------------------------------------
 	* 
 	* 文件存在性及其元数据查询
@@ -124,6 +127,129 @@ public:
 	 *         FileSystemError::UnKnown 未知错误
 	 */
 	FileSystemError appendAllBytes(const std::string& path, std::vector<uint8_t>& data) override;
+
+
+	/*--------------------------------------------------------------------------
+	*
+	* 文件与目录操作
+	*
+	---------------------------------------------------------------------------*///
+
+	/**
+		* \brief 列出指定目录下的所有文件和子目录
+		*
+		* \param path 目录路径
+		* \param[out] outEntries 输出参数，返回目录中的所有条目
+		* \return FileSystemError::Success 遍历成功
+		*         FileSystemError::NotFound 目录不存在
+		*         FileSystemError::InvalidPath 无效路径
+		*         FileSystemError::AccessDenied 程序权限不足
+		*         FileSystemError::IsFile 路径为文件
+		*         FileSystemError::Unknown 未知错误
+		*/
+	FileSystemError listDirectory(const std::string& path, std::vector<DirectoryEntry>& outEntries) override;
+
+	/**
+	 * \brief 移动文件
+	 *
+	 * 将文件从源路径移动到目标路径，支持跨盘
+	 * 若目标已存在且 overwrite 为 false，则返回 FileSystemError::AlreadyExists
+	 * 在某些平台下，moveFile 对目录也能操作成功并且不返回 FileSystemError::IsDirectory，但是强烈建议分开使用
+	 *
+	 * \param src 源文件路径
+	 * \param dst 目标文件路径
+	 * \param overwrite 是否覆盖已有文件（默认为 false）
+	 * \return FileSystemError::Success 移动成功
+	 *         FileSystemError::NotFound 源文件不存在
+	 *         FileSystemError::InvalidPath 无效路径
+	 *         FileSystemError::AccessDenied 程序权限不足
+	 *         FileSystemError::IsDirectory 源路径指向目录，若需要移动目录，请调用 moveDirectory 函数
+	 *         FileSystemError::AlreadyExists 目标已存在且本次操作为不覆盖
+	 *         FileSystemError::Unknown 未知错误
+	 */
+	FileSystemError moveFile(const std::string& src, const std::string& dst, bool overwrite = false) override;
+
+	/**
+	 * \brief 复制文件
+	 *
+	 * 将文件从源路径复制到目标路径，支持跨盘
+	 * 若目标已存在且 overwrite 为 false，则返回 FileSystemError::AlreadyExists
+	 *
+	 * \param src 源文件路径
+	 * \param dst 目标文件路径
+	 * \param overwrite 是否覆盖已有文件（默认为 false）
+	 * \return FileSystemError::Success 移动成功
+	 *         FileSystemError::NotFound 源文件不存在
+	 *         FileSystemError::InvalidPath 无效路径
+	 *         FileSystemError::AccessDenied 程序权限不足
+	 *         FileSystemError::IsDirectory 源路径指向目录，若需要复制目录，请调用 copyDirectory 函数
+	 *         FileSystemError::DiskFull 磁盘空间不足
+	 *         FileSystemError::AlreadyExists 目标已存在且本次操作为不覆盖
+	 *         FileSystemError::Unknown 未知错误
+	 */
+	FileSystemError copyFile(const std::string& src, const std::string& dst, bool overwrite = false) override;
+
+	/**
+	 * \brief 删除文件
+	 *
+	 * \param path 要删除的文件路径
+	 * \return FileSystemError::Success 删除成功
+	 *         FileSystemError::NotFound 文件不存在
+	 *         FileSystemError::InvalidPath 无效路径
+	 *         FileSystemError::AccessDenied 程序权限不足
+	 *         FileSystemError::IsDirectory 源路径指向目录，若需要删除目录，请调用 removeDirectory 函数
+	 *         FileSystemError::Unknown 未知错误
+	 */
+	FileSystemError deleteFile(const std::string& path) override;
+
+	/**
+	 * \brief 创建目录
+	 *
+	 * 在指定路径创建目录，只创建单层，不支持递归创建
+	 * 若路径已存在同名文件，返回 FileSystemError::IsFile
+	 * 若目录已存在，返回 FileSystemError::AlreadyExists
+	 *
+	 * \param path 要创建的目录路径
+	 * \return FileSystemError::Success 创建成功
+	 *         FileSystemError::NotFound 父目录不存在
+	 *         FileSystemError::InvalidPath 无效路径
+	 *         FileSystemError::AccessDenied 程序权限不足
+	 *         FileSystemError::AlreadyExists 目录已存在
+	 *         FileSystemError::IsFile 路径已存在同名文件
+	 *         FileSystemError::Unknown 未知错误
+	 */
+	FileSystemError createDirectory(const std::string& path) override;
+
+	/**
+	 * \brief 移动目录
+	 *
+	 * \param src 源目录路径
+	 * \param dst 目标目录路径
+	 * \param overwrite 是否覆盖已有目录（默认为 false）
+	 * \return FileSystemError::Success 移动成功
+	 *         FileSystemError::NotFound 源目录不存在
+	 *         FileSystemError::InvalidPath 无效路径
+	 *         FileSystemError::AccessDenied 程序权限不足
+	 *         FileSystemError::AlreadyExists 目录已存在且本次操作为不覆盖
+	 *         FileSystemError::DirectoryNotEmpty 目录已存在且非空，无法覆盖
+	 *         FileSystemError::IsFile 源路径为文件，若需要移动文件，请调用 moveFile 函数
+	 *         FileSystemError::Unknown 未知错误
+	 */
+	FileSystemError moveDirectory(const std::string& src, const std::string& dst, bool overwrite = false) override;
+
+	/**
+		 * \brief 删除目录
+		 *
+		 * \param path 要删除的目录路径
+		 * \return FileSystemError::Success 删除成功
+		 *         FileSystemError::NotFound 目录不存在
+		 *         FileSystemError::InvalidPath 无效路径
+		 *         FileSystemError::AccessDenied 程序权限不足
+		 *         FileSystemError::DirectoryNotEmpty 目录非空且本次操作为不递归删除
+		 *         FileSystemError::IsFile 路径为文件，若需要删除文件，请调用 deleteFile 函数
+		 *         FileSystemError::Unknown 未知错误
+		 */
+	FileSystemError removeDirectory(const std::string& path) override;
 
 	protected:
 		std::string error_message_ = { 0 };

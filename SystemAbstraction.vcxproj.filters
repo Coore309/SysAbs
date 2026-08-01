@@ -41,7 +41,13 @@
     <ClCompile Include="src\factory.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
-    <ClCompile Include="test02_file_bytes_oi.cpp">
+    <ClCompile Include="test\ifilesystem\test02_file_read_write.cpp">
+      <Filter>源文件\测试代码</Filter>
+    </ClCompile>
+    <ClCompile Include="test\ifilesystem\test03_file_and_dir_operations.cpp">
+      <Filter>源文件\测试代码</Filter>
+    </ClCompile>
+    <ClCompile Include="test\ifilesystem\test04_validatePath.cpp">
       <Filter>源文件\测试代码</Filter>
     </ClCompile>
   </ItemGroup>

@@ -26,7 +26,9 @@
     <ClCompile Include="src\factory.cpp" />
     <ClCompile Include="src\platform\windows\windows_filesystem.cpp" />
     <ClCompile Include="test\ifilesystem\test01_file_attributes.cpp" />
-    <ClCompile Include="test02_file_bytes_oi.cpp" />
+    <ClCompile Include="test\ifilesystem\test02_file_read_write.cpp" />
+    <ClCompile Include="test\ifilesystem\test03_file_and_dir_operations.cpp" />
+    <ClCompile Include="test\ifilesystem\test04_validatePath.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>18.0</VCProjectVersion>
