@@ -13,9 +13,6 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
-    <Filter Include="源文件\测试代码">
-      <UniqueIdentifier>{3c9744f3-5cab-41b3-8bd7-79c3b779a1e9}</UniqueIdentifier>
-    </Filter>
     <Filter Include="源文件\Windows">
       <UniqueIdentifier>{8c20093c-55a8-4542-ad02-fd28c1a0226a}</UniqueIdentifier>
     </Filter>
@@ -35,20 +32,8 @@
     <ClCompile Include="src\platform\windows\windows_filesystem.cpp">
       <Filter>源文件\Windows</Filter>
     </ClCompile>
-    <ClCompile Include="test\ifilesystem\test01_file_attributes.cpp">
-      <Filter>源文件\测试代码</Filter>
-    </ClCompile>
     <ClCompile Include="src\factory.cpp">
       <Filter>源文件</Filter>
-    </ClCompile>
-    <ClCompile Include="test\ifilesystem\test02_file_read_write.cpp">
-      <Filter>源文件\测试代码</Filter>
-    </ClCompile>
-    <ClCompile Include="test\ifilesystem\test03_file_and_dir_operations.cpp">
-      <Filter>源文件\测试代码</Filter>
-    </ClCompile>
-    <ClCompile Include="test\ifilesystem\test04_validatePath.cpp">
-      <Filter>源文件\测试代码</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>
